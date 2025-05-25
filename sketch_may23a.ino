@@ -1,5 +1,8 @@
 #include <Adafruit_GFX.h>
 #include <Adafruit_ILI9341.h>
+#include <Wire.h>
+#include <Rtc_Pcf8563.h>
+#include <string.h>
 
 // TFT setup
 #define TFT_CS     10
@@ -11,6 +14,8 @@
 #define EXITING_STATE 3
 
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
+Rtc_Pcf8563 rtc;
+uint16_t sky_color;
 
 // Joystick pins
 #define JOY_VERT A0
@@ -145,16 +150,26 @@ void draw_enemy_spaceship(EnemySpaceship enemy, uint16_t color) {
 }
 
 Spaceship init_player(float x, float y) {
-    tft.fillScreen(ILI9341_MAROON);
-    Spaceship new_spaceship;
-    new_spaceship.x_position = x;
-    new_spaceship.y_position = y;
-    new_spaceship.damage = 10;
-    new_spaceship.health = 3;
-    new_spaceship.dimension = 10;
+  tft.fillScreen(ILI9341_BLACK);
+  int hour = rtc.getHour();
 
-    draw_spaceship(new_spaceship, ILI9341_BLACK);
-    return new_spaceship;
+  if (hour >= 17 || hour <= 6) {
+    sky_color = tft.color565(150, 165, 0);
+  } else {
+    sky_color = ILI9341_BLUE;
+  }
+
+  tft.fillScreen(sky_color);
+
+  Spaceship new_spaceship;
+  new_spaceship.x_position = x;
+  new_spaceship.y_position = y;
+  new_spaceship.damage = 10;
+  new_spaceship.health = 3;
+  new_spaceship.dimension = 10;
+
+  draw_spaceship(new_spaceship, ILI9341_BLACK);
+  return new_spaceship;
 }
 
 void setup_tower_information() {
@@ -171,8 +186,9 @@ void setup_bullet_statements() {
 }
 void setup() {
   Serial.begin(9600);
-
+  Wire.begin();
   tft.begin();
+
   tft.setRotation(3);
   tft.fillScreen(ILI9341_MAROON);
   tft.setTextSize(2);
@@ -191,6 +207,11 @@ void setup() {
   //   tone(buzzerPin, melody[i], noteDuration);
   //   delay(noteDuration / 5);  // Slight delay between notes
   // }
+
+  rtc.initClock();
+
+  // Set time from compile time
+  setRtcFromCompileTime();
 }
 
 void draw_decoration_towers() {
@@ -252,7 +273,7 @@ void game_loop(Spaceship &spaceship) {
     }
 
     if (enemies[i].is_alive == true) {
-      draw_enemy_spaceship(enemies[i], ILI9341_MAROON);
+      draw_enemy_spaceship(enemies[i], sky_color);
       enemies[i].x_position -= 0.2;
       draw_enemy_spaceship(enemies[i], ILI9341_RED);
     }
@@ -264,7 +285,7 @@ void game_loop(Spaceship &spaceship) {
 
   if (current_vert > 600 || current_vert < 400 || current_horz < 400 || current_horz > 600) {
     move = true;
-    draw_spaceship(spaceship, ILI9341_MAROON);
+    draw_spaceship(spaceship, sky_color);
   }
 
   if (current_vert > 600 && spaceship.y_position > 2) {
@@ -300,8 +321,8 @@ void game_loop(Spaceship &spaceship) {
             bullet_state[i] = 0;
 
             // drawing the enemy and bullet so they are invisible
-            draw_enemy_spaceship(enemies[j], ILI9341_MAROON);
-            tft.fillCircle(bullet_positions[i], bullet_y_positions[i], bullet_radius, ILI9341_MAROON);
+            draw_enemy_spaceship(enemies[j], sky_color);
+            tft.fillCircle(bullet_positions[i], bullet_y_positions[i], bullet_radius, sky_color);
             bullet_positions[i] = 10000;
 
             break;
@@ -309,7 +330,7 @@ void game_loop(Spaceship &spaceship) {
         }
       }
 
-      tft.fillCircle(bullet_positions[i], bullet_y_positions[i], bullet_radius, ILI9341_MAROON);
+      tft.fillCircle(bullet_positions[i], bullet_y_positions[i], bullet_radius, sky_color);
       bullet_positions[i] += 1;
       tft.fillCircle(bullet_positions[i], bullet_y_positions[i], bullet_radius, ILI9341_BLACK);
     }
@@ -384,4 +405,19 @@ void drawMenu() {
     tft.setCursor(20, 30 + i * 30);
     tft.print(menuItems[i]);
   }
+}
+
+void setRtcFromCompileTime() {
+  const char* time = __TIME__; // "15:42:00"
+
+  Serial.println(String(time));
+  
+  char *p = strtok(time, ":");
+  int hour = atoi(p);
+  p = strtok(NULL, ":");
+  int minute = atoi(p);
+  p = strtok(NULL, ":");
+  int seconds = atoi(p);
+
+  rtc.setTime(hour, minute, seconds);
 }
