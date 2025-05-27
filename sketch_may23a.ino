@@ -77,7 +77,6 @@ const int menuLength = sizeof(menuItems) / sizeof(menuItems[0]);
 int selectedItem = 0;
 int current_game_state = 0;
 unsigned long lastMove = 0;
-bool in_playing_mode = true;
 
 // const variables
 const uint8_t maximum_decoration_towers = 15;
@@ -102,6 +101,7 @@ uint8_t tower_height[maximum_decoration_towers] = {50, 80, 50, 40, 90, 60, 50, 6
 int moveDelay = 500;
 uint16_t bullet_positions[maximum_bullets_on_screen];
 uint16_t bullet_y_positions[maximum_bullets_on_screen];
+int winning_time = 0;
 
 uint8_t bullet_state[maximum_bullets_on_screen];
 uint16_t pending_bullet = 0;
@@ -109,6 +109,7 @@ const uint8_t bullet_radius = 2;
 unsigned long last_shoot = 0;
 const long shoot_delay = 2000;
 const uint8_t shooting_limit_tolerance = 10;
+unsigned long count = 0;
 
 void draw_spaceship (Spaceship spaceship, uint16_t color) {
     tft.setCursor(spaceship.x_position, spaceship.y_position);
@@ -203,8 +204,8 @@ void setup() {
   current_game_state = MAIN_MENU_STATE;
   
   // logic for welcoming song
-  // for (int i = 0; i < 8; i++) {
-  //   tone(buzzerPin, melody[i], noteDuration);
+  // for (int i = 0; i < 64; i++) {
+  //   tone(buzzerPin, melody[i] * 3, noteDuration);
   //   delay(noteDuration / 5);  // Slight delay between notes
   // }
 
@@ -355,10 +356,6 @@ void loop() {
   float vert = analogRead(JOY_VERT);
   float horz = analogRead(JOY_HORZ);
 
-  if (in_playing_mode = true) {
-    in_playing_mode = false;
-  }
-
   if (current_game_state == MAIN_MENU_STATE) {
     // Handle up/down navigation with basic debouncing
     if (millis() - lastMove > moveDelay) {
@@ -376,14 +373,12 @@ void loop() {
     }
   }
 
-//   Optional: handle button press to "select" item
-  if (digitalRead(JOY_BUTTON) == LOW) {
-    if (current_game_state == WINNING_STATE) {
-      current_game_state = MAIN_MENU_STATE;
-    } else if (current_game_state == MAIN_MENU_STATE && in_playing_mode == false) {
-      in_playing_mode = true;
+  if (digitalRead(JOY_BUTTON) == LOW && millis() - winning_time > 2000) {
+    if (current_game_state == MAIN_MENU_STATE) {
+      Serial.println("Joc nou");
       current_game_state = GAME_STATE;
       Spaceship player_spaceship = init_player(0, 50);
+
       while(1) {
         game_loop(player_spaceship);
 
@@ -391,6 +386,18 @@ void loop() {
           break;
         }
       }
+    } else if (current_game_state == WINNING_STATE) {
+      current_game_state = MAIN_MENU_STATE;
+      winning_time = millis();
+      tft.fillScreen(ILI9341_MAROON);
+      tft.setTextSize(2);
+      tft.setTextColor(ILI9341_BLACK);
+      drawMenu();
+
+      current_wave = 0;
+      pending_bullet = 0;
+      enemies_displayed = 0;
+      drawn_decoration_towers = false;
     }
   }
 }
