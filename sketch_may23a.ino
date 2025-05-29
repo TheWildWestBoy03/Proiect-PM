@@ -12,6 +12,7 @@
 #define GAME_STATE 1
 #define WINNING_STATE 2
 #define EXITING_STATE 3
+#define LOSING_STATE 4
 
 Adafruit_ILI9341 tft = Adafruit_ILI9341(TFT_CS, TFT_DC, TFT_RST);
 Rtc_Pcf8563 rtc;
@@ -34,7 +35,8 @@ struct Spaceship {
 struct EnemySpaceship {
   bool is_alive;
   float x_position;
-  uint16_t y_position;
+  float y_position;
+  int16_t health;
   uint16_t dimension;
   uint16_t x_limit; // this parameter is available only for the boss
 };
@@ -43,6 +45,10 @@ struct Coordinates {
     float x;
     float y;
 };
+
+unsigned long my_millis() {
+  return millis();
+}
 
 // Pin connected to the buzzer
 int buzzerPin = 8;
@@ -77,6 +83,7 @@ const int menuLength = sizeof(menuItems) / sizeof(menuItems[0]);
 int selectedItem = 0;
 int current_game_state = 0;
 unsigned long lastMove = 0;
+bool player_lost = false;
 
 // const variables
 const uint8_t maximum_decoration_towers = 15;
@@ -88,7 +95,9 @@ const uint8_t maximum_enemies = 4;
 uint8_t enemies_displayed = 0;
 const uint8_t enemies_per_wave = 2;
 EnemySpaceship enemies[maximum_enemies];
+EnemySpaceship final_boss;
 uint8_t current_wave = 0;
+bool boss_ascending = true;
 
 // towers generic information
 bool drawn_decoration_towers = false;
@@ -99,7 +108,7 @@ uint8_t tower_height[maximum_decoration_towers] = {50, 80, 50, 40, 90, 60, 50, 6
 
 // delay in ms used in debouncing implementation for joystick btn
 int moveDelay = 500;
-uint16_t bullet_positions[maximum_bullets_on_screen];
+uint16_t bullet_x_positions[maximum_bullets_on_screen];
 uint16_t bullet_y_positions[maximum_bullets_on_screen];
 int winning_time = 0;
 
@@ -107,9 +116,12 @@ uint8_t bullet_state[maximum_bullets_on_screen];
 uint16_t pending_bullet = 0;
 const uint8_t bullet_radius = 2;
 unsigned long last_shoot = 0;
-const long shoot_delay = 2000;
+const long shoot_delay = 500;
+uint16_t player_score = 0;
 const uint8_t shooting_limit_tolerance = 10;
+const uint8_t passing_limit = 30;
 unsigned long count = 0;
+bool finished_waves = false;
 
 void draw_spaceship (Spaceship spaceship, uint16_t color) {
     tft.setCursor(spaceship.x_position, spaceship.y_position);
@@ -130,7 +142,7 @@ void draw_spaceship (Spaceship spaceship, uint16_t color) {
                      right_dot.x, right_dot.y, color);
 }
 
-void draw_enemy_spaceship(EnemySpaceship enemy, uint16_t color) {
+void draw_enemy_spaceship(EnemySpaceship enemy, uint16_t color, int dimension) {
   tft.setCursor(enemy.x_position, enemy.y_position);
 
   Coordinates left_dot;
@@ -138,12 +150,12 @@ void draw_enemy_spaceship(EnemySpaceship enemy, uint16_t color) {
   left_dot.y = enemy.y_position; 
 
   Coordinates right_down_dot;
-  right_down_dot.x = enemy.x_position + 10;
-  right_down_dot.y = enemy.y_position + 10;
+  right_down_dot.x = enemy.x_position + dimension;
+  right_down_dot.y = enemy.y_position + dimension;
 
   Coordinates right_up_dot;
-  right_up_dot.x = enemy.x_position + 10;
-  right_up_dot.y = enemy.y_position - 10;
+  right_up_dot.x = enemy.x_position + dimension;
+  right_up_dot.y = enemy.y_position - dimension;
 
   tft.fillTriangle(left_dot.x, left_dot.y, 
                     right_up_dot.x, right_up_dot.y,
@@ -204,9 +216,9 @@ void setup() {
   current_game_state = MAIN_MENU_STATE;
   
   // logic for welcoming song
-  // for (int i = 0; i < 64; i++) {
-  //   tone(buzzerPin, melody[i] * 3, noteDuration);
-  //   delay(noteDuration / 5);  // Slight delay between notes
+  // for (int i = 0; i < 8; i++) {
+  //   tone(buzzerPin, melody[i], noteDuration);
+  //   delay(noteDuration / 10);  // Slight delay between notes
   // }
 
   rtc.initClock();
@@ -236,15 +248,77 @@ void draw_decoration_towers() {
 }
 
 void game_loop(Spaceship &spaceship) {
-  if (current_wave >= maximum_waves) {
+  if (final_boss.is_alive == false && finished_waves == true) {
     current_game_state = WINNING_STATE;
     tft.fillScreen(ILI9341_MAROON);
-    tft.setTextSize(4);
+    tft.setTextSize(2);
     tft.setTextColor(ILI9341_YELLOW);
-
+    tft.setCursor(20, 20);
     tft.print("Congratulations!!! You won the game!!");
 
     return;
+  }
+
+  // handling the boss battle situation
+  if (current_wave >= maximum_waves) {
+    if (finished_waves == false) {
+      final_boss.x_limit = 200;
+      final_boss.x_position = tft.width();
+      final_boss.y_position = 50;
+      final_boss.is_alive = true;
+      final_boss.health = 100;
+    }
+  
+    finished_waves = true;
+    
+    if (final_boss.is_alive == true) {
+      draw_enemy_spaceship(final_boss, sky_color, 30);
+
+      if (final_boss.x_position > final_boss.x_limit) {
+        final_boss.x_position -= 2;
+      } else {
+        if (boss_ascending == true) {
+          final_boss.y_position -= 0.3;
+        } else {
+          final_boss.y_position += 0.3;
+        }
+
+        if (final_boss.y_position < 10) {
+          boss_ascending = false;
+        } else if (final_boss.y_position >= 100) {
+          boss_ascending = true;
+        }
+      }
+
+      draw_enemy_spaceship(final_boss, ILI9341_BLACK, 30);
+
+      // make sure the bullet doesn't avoid the boss
+      for (uint8_t i = 0; i < pending_bullet; i++) {
+        if (bullet_state[i] == 1) {
+          if (bullet_x_positions[i] > tft.width()) {
+            current_game_state = LOSING_STATE;
+            tft.fillScreen(ILI9341_MAROON);
+            tft.setTextSize(2);
+            tft.setTextColor(ILI9341_YELLOW);
+            tft.setCursor(20, 20);
+            tft.print("You lost this game!! Try again!");
+            
+            player_lost = true;
+            break;
+          } else {
+            if (abs(final_boss.x_position - bullet_x_positions[i]) < 20 && abs(final_boss.y_position - bullet_y_positions[i]) < 20) {
+              final_boss.health -= 40;
+              Serial.println(final_boss.health);
+              tft.fillCircle(bullet_x_positions[i], bullet_y_positions[i], bullet_radius, sky_color);
+              bullet_state[i] = 0;
+              if (final_boss.health < 0) {
+                final_boss.is_alive = false;
+              }
+            }
+          }
+        }
+      }
+    }
   }
 
   if (!drawn_decoration_towers) {
@@ -259,25 +333,47 @@ void game_loop(Spaceship &spaceship) {
       enemies[i].is_alive = true;
       enemies[i].dimension = 10;
 
-      draw_enemy_spaceship(enemies[i], ILI9341_RED);
+      draw_enemy_spaceship(enemies[i], ILI9341_RED, 10);
     }
 
-    current_wave += 1;
     enemies_displayed += enemies_per_wave;
   }
 
-  //handling enemies if any
+  //handling enemies if any of them displayed
   for (int i = 0; i < enemies_per_wave; i++) {
-    if (enemies[i].x_position < 0) {
+    if (enemies[i].is_alive == true) {
+      if (abs(enemies[i].x_position - spaceship.x_position) < 20 && abs(enemies[i].y_position - spaceship.y_position) < 20) {
+        current_game_state = LOSING_STATE;
+        tft.fillScreen(ILI9341_MAROON);
+        tft.setTextSize(2);
+        tft.setTextColor(ILI9341_YELLOW);
+        tft.setCursor(20, 20);
+        tft.print("You lost this game!! Try again!");
+        
+        player_lost = true;
+        break;
+      }
+    }
+  
+    if (enemies[i].x_position < 0 - passing_limit) {
       enemies[i].is_alive == false;
       enemies_displayed -= 1;
+      
+      if (!enemies_displayed) {
+        current_wave += 1;
+      }
     }
 
     if (enemies[i].is_alive == true) {
-      draw_enemy_spaceship(enemies[i], sky_color);
-      enemies[i].x_position -= 0.2;
-      draw_enemy_spaceship(enemies[i], ILI9341_RED);
+      draw_enemy_spaceship(enemies[i], sky_color, 10);
+      enemies[i].x_position -= 0.2f;
+      draw_enemy_spaceship(enemies[i], ILI9341_RED, 10);
     }
+  }
+
+  if (player_lost == true) {
+    Serial.println("am pierdut");
+    return;
   }
 
   float current_vert = analogRead(JOY_VERT);
@@ -289,9 +385,9 @@ void game_loop(Spaceship &spaceship) {
     draw_spaceship(spaceship, sky_color);
   }
 
-  if (current_vert > 600 && spaceship.y_position > 2) {
+  if (current_vert > 600 && spaceship.y_position > 30) {
       spaceship.y_position -= 2;
-  } else if (current_vert < 400 && spaceship.y_position < 100) {
+  } else if (current_vert < 400 && spaceship.y_position < 150) {
       spaceship.y_position += 2;
   }
 
@@ -303,7 +399,7 @@ void game_loop(Spaceship &spaceship) {
 
   // displaying bullets if any
   for (uint8_t i = 0; i < pending_bullet; i++) {
-    if (bullet_positions[i] < tft.width() + shooting_limit_tolerance && bullet_state[i] == 1) {
+    if (bullet_x_positions[i] < tft.width() + shooting_limit_tolerance && bullet_state[i] == 1) {
       for (int j = 0; j < enemies_per_wave; j++) {
 
         if (enemies[j].x_position < 0) {
@@ -312,38 +408,45 @@ void game_loop(Spaceship &spaceship) {
         }
 
         if (enemies[j].is_alive == true) {
-          uint16_t x_bullet = bullet_positions[i];
+          uint16_t x_bullet = bullet_x_positions[i];
           uint16_t y_bullet = bullet_y_positions[i];
 
-          if (enemies[j].x_position - x_bullet < 7 && enemies[j].y_position - y_bullet < 7 && bullet_state[i] == 1) {
-            Serial.println("enemy killed");
-            enemies[j].is_alive = 0;
+          if (enemies[j].x_position - x_bullet < 20 && abs(enemies[j].y_position - y_bullet) < 20 && bullet_state[i] == 1) {
+            enemies[j].is_alive = false;
             enemies_displayed -= 1;
+
+            if (!enemies_displayed) {
+              current_wave += 1;
+            }
+
             bullet_state[i] = 0;
 
             // drawing the enemy and bullet so they are invisible
-            draw_enemy_spaceship(enemies[j], sky_color);
-            tft.fillCircle(bullet_positions[i], bullet_y_positions[i], bullet_radius, sky_color);
-            bullet_positions[i] = 10000;
-
+            draw_enemy_spaceship(enemies[j], sky_color, 10);
+            player_score += 100;
+            tft.setCursor(1, 5);
+            tft.setTextSize(1);
+            tft.print("Player score: " + String(player_score));
+            tft.fillCircle(bullet_x_positions[i], bullet_y_positions[i], bullet_radius, sky_color);
+            bullet_x_positions[i] = 10000;
             break;
           }
         }
       }
 
-      tft.fillCircle(bullet_positions[i], bullet_y_positions[i], bullet_radius, sky_color);
-      bullet_positions[i] += 1;
-      tft.fillCircle(bullet_positions[i], bullet_y_positions[i], bullet_radius, ILI9341_BLACK);
+      tft.fillCircle(bullet_x_positions[i], bullet_y_positions[i], bullet_radius, sky_color);
+      bullet_x_positions[i] += 15;
+      tft.fillCircle(bullet_x_positions[i], bullet_y_positions[i], bullet_radius, ILI9341_BLACK);
     }
   }
 
-  if (digitalRead(JOY_BUTTON) == LOW && (millis() - last_shoot > shoot_delay)) {
+  if (digitalRead(JOY_BUTTON) == LOW && (my_millis() - last_shoot > shoot_delay)) {
     uint8_t bullet_x = spaceship.x_position + 40;
-    bullet_positions[pending_bullet] = bullet_x;
+    bullet_x_positions[pending_bullet] = bullet_x;
     bullet_y_positions[pending_bullet] = spaceship.y_position;
     pending_bullet += 1;
 
-    last_shoot = millis();
+    last_shoot = my_millis();
   }
 
   // draw the spaceship with the new coordinates
@@ -358,46 +461,55 @@ void loop() {
 
   if (current_game_state == MAIN_MENU_STATE) {
     // Handle up/down navigation with basic debouncing
-    if (millis() - lastMove > moveDelay) {
+    if (my_millis() - lastMove > moveDelay) {
       if (vert < 400) { // Down
         selectedItem++;
         if (selectedItem < 0) selectedItem = menuLength - 1;
-        lastMove = millis();
+        lastMove = my_millis();
         drawMenu();
       } else if (vert > 600) { // Up
         selectedItem--;
         if (selectedItem >= menuLength) selectedItem = 0;
-        lastMove = millis();
+        lastMove = my_millis();
         drawMenu();
       }
     }
   }
 
-  if (digitalRead(JOY_BUTTON) == LOW && millis() - winning_time > 2000) {
+  if (digitalRead(JOY_BUTTON) == LOW && my_millis() - winning_time > 500) {
     if (current_game_state == MAIN_MENU_STATE) {
-      Serial.println("Joc nou");
       current_game_state = GAME_STATE;
       Spaceship player_spaceship = init_player(0, 50);
+      tft.setCursor(1, 5);
+      tft.setTextSize(1);
+      tft.setTextColor(ILI9341_WHITE, sky_color);
+      tft.print("Player score: " + String(player_score));
 
+      memset(&final_boss, 0, sizeof(EnemySpaceship));
       while(1) {
         game_loop(player_spaceship);
 
-        if (current_game_state == WINNING_STATE) {
+        if (current_game_state == WINNING_STATE || current_game_state == LOSING_STATE) {
           break;
         }
       }
-    } else if (current_game_state == WINNING_STATE) {
+    } else if (current_game_state == WINNING_STATE || current_game_state == LOSING_STATE) {
       current_game_state = MAIN_MENU_STATE;
-      winning_time = millis();
+      winning_time = my_millis();
       tft.fillScreen(ILI9341_MAROON);
       tft.setTextSize(2);
       tft.setTextColor(ILI9341_BLACK);
       drawMenu();
 
+      finished_waves = false;
+      memset(&final_boss, 0, sizeof(EnemySpaceship));
       current_wave = 0;
       pending_bullet = 0;
       enemies_displayed = 0;
       drawn_decoration_towers = false;
+      player_lost = false;
+      player_score = 0;
+      boss_ascending = true;
     }
   }
 }
@@ -415,10 +527,8 @@ void drawMenu() {
 }
 
 void setRtcFromCompileTime() {
-  const char* time = __TIME__; // "15:42:00"
+  const char* time = __TIME__;
 
-  Serial.println(String(time));
-  
   char *p = strtok(time, ":");
   int hour = atoi(p);
   p = strtok(NULL, ":");
