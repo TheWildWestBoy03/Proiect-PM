@@ -46,10 +46,6 @@ struct Coordinates {
     float y;
 };
 
-unsigned long my_millis() {
-  return millis();
-}
-
 // Pin connected to the buzzer
 int buzzerPin = 8;
 
@@ -122,6 +118,65 @@ const uint8_t shooting_limit_tolerance = 10;
 const uint8_t passing_limit = 30;
 unsigned long count = 0;
 bool finished_waves = false;
+
+volatile unsigned long customMillis = 0;
+
+void setupTimer1() {
+  noInterrupts();           // disable all interrupts
+
+  TCCR1A = 0;               // clear Timer/Counter Control Registers
+  TCCR1B = 0;
+
+  TCNT1 = 0;                // initialize counter value to 0
+
+  // Set compare match register for 1ms increments
+  OCR1A = 249;              // (16*10^6) / (64*1000) - 1 = 249 (for 1kHz)
+
+  // Turn on CTC mode
+  TCCR1B |= (1 << WGM12);
+
+  // Set CS11 and CS10 bits for 64 prescaler
+  TCCR1B |= (1 << CS11) | (1 << CS10);
+
+  // Enable Timer Compare Interrupt
+  TIMSK1 |= (1 << OCIE1A);
+
+  interrupts();             // enable all interrupts
+}
+
+ISR(TIMER1_COMPA_vect) {
+  customMillis++;
+}
+
+unsigned long my_millis() {
+  return customMillis;
+}
+
+void adc_init(void) {
+    // Set ADC prescaler to 128
+    ADCSRA |= (1 << ADPS2) | (1 << ADPS1) | (1 << ADPS0);
+
+    // Set reference voltage to AVCC
+    ADMUX = (1 << REFS0);  // Clear other bits explicitly
+
+    // Enable ADC
+    ADCSRA |= (1 << ADEN);
+}
+
+uint16_t myAnalogRead(uint8_t channel) {
+    channel &= 0x07;  // only 0-7 valid
+
+    // Set reference and channel (preserve REFS0)
+    ADMUX = (ADMUX & 0xF0) | channel;
+
+    // Start conversion
+    ADCSRA |= (1 << ADSC);
+
+    // Wait for conversion to complete
+    while (ADCSRA & (1 << ADSC));
+
+    return ADC;
+}
 
 void draw_spaceship (Spaceship spaceship, uint16_t color) {
     tft.setCursor(spaceship.x_position, spaceship.y_position);
@@ -201,6 +256,8 @@ void setup() {
   Serial.begin(9600);
   Wire.begin();
   tft.begin();
+  adc_init();
+  setupTimer1();
 
   tft.setRotation(3);
   tft.fillScreen(ILI9341_MAROON);
@@ -376,8 +433,8 @@ void game_loop(Spaceship &spaceship) {
     return;
   }
 
-  float current_vert = analogRead(JOY_VERT);
-  float current_horz = analogRead(JOY_HORZ);
+  float current_vert = myAnalogRead(JOY_VERT - A0);
+  float current_horz = myAnalogRead(JOY_HORZ - A0);
   bool move = false;
 
   if (current_vert > 600 || current_vert < 400 || current_horz < 400 || current_horz > 600) {
@@ -437,6 +494,8 @@ void game_loop(Spaceship &spaceship) {
       tft.fillCircle(bullet_x_positions[i], bullet_y_positions[i], bullet_radius, sky_color);
       bullet_x_positions[i] += 15;
       tft.fillCircle(bullet_x_positions[i], bullet_y_positions[i], bullet_radius, ILI9341_BLACK);
+    } else {
+      bullet_state[i] = 0;
     }
   }
 
@@ -456,8 +515,8 @@ void game_loop(Spaceship &spaceship) {
 }
 
 void loop() {
-  float vert = analogRead(JOY_VERT);
-  float horz = analogRead(JOY_HORZ);
+  float vert = myAnalogRead(JOY_VERT - A0);
+  float horz = myAnalogRead(JOY_HORZ - A0);
 
   if (current_game_state == MAIN_MENU_STATE) {
     // Handle up/down navigation with basic debouncing
