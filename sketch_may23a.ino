@@ -272,10 +272,10 @@ void setup() {
   current_game_state = MAIN_MENU_STATE;
 
   // ruleaza melodia de bun venit  
-  for (int i = 0; i < 8; i++) {
-    tone(buzzerPin, melody[i], noteDuration);
-    delay(noteDuration / 5);  // Slight delay between notes
-  }
+  // for (int i = 0; i < 8; i++) {
+  //   tone(buzzerPin, melody[i], noteDuration);
+  //   delay(noteDuration / 5);  // Slight delay between notes
+  // }
 
   rtc.initClock();
 
@@ -423,7 +423,7 @@ void game_loop(Spaceship &spaceship) {
         
         for (int i = 0; i < 24; i++) {
           tone(buzzerPin, loseNotes[i], noteDuration);
-          delay(noteDuration / 2);  // Slight delay between notes
+          delay(noteDuration / 2);
         }
         player_lost = true;
         break;
@@ -461,9 +461,9 @@ void game_loop(Spaceship &spaceship) {
     draw_spaceship(spaceship, sky_color);
   }
 
-  if (current_vert > 600 && spaceship.y_position > 30) {
+  if (current_vert < 400 && spaceship.y_position > 30) {
       spaceship.y_position -= 2;
-  } else if (current_vert < 400 && spaceship.y_position < 150) {
+  } else if (current_vert > 600 && spaceship.y_position < 150) {
       spaceship.y_position += 2;
   }
 
@@ -542,12 +542,12 @@ void loop() {
   if (current_game_state == MAIN_MENU_STATE) {
     // Gestionarea navigarii prin meniu
     if (my_millis() - lastMove > moveDelay) {
-      if (vert < 400) {
+      if (vert > 600) {
         selectedItem++;
         if (selectedItem < 0) selectedItem = menuLength - 1;
         lastMove = my_millis();
         drawMenu();
-      } else if (vert > 600) {
+      } else if (vert < 400) {
         selectedItem--;
         if (selectedItem >= menuLength) selectedItem = 0;
         lastMove = my_millis();
