@@ -272,10 +272,10 @@ void setup() {
   current_game_state = MAIN_MENU_STATE;
 
   // ruleaza melodia de bun venit  
-  // for (int i = 0; i < 8; i++) {
-  //   tone(buzzerPin, melody[i], noteDuration);
-  //   delay(noteDuration / 5);  // Slight delay between notes
-  // }
+  for (int i = 0; i < 8; i++) {
+    tone(buzzerPin, melody[i], noteDuration);
+    delay(noteDuration / 5);  // Slight delay between notes
+  }
 
   rtc.initClock();
 
@@ -313,7 +313,9 @@ void game_loop(Spaceship &spaceship) {
     tft.setTextSize(2);
     tft.setTextColor(ILI9341_YELLOW);
     tft.setCursor(20, 20);
-    tft.print("Congratulations!!! You won the game!!");
+    tft.println("Congratulations!!! You won the game!!");
+    tft.print("Final score: " + String(player_score));
+
     for (int i = 0; i < 24; i++) {
       tone(buzzerPin, winNotes[i], noteDuration);
       delay(noteDuration / 2);  // Slight delay between notes
@@ -366,7 +368,8 @@ void game_loop(Spaceship &spaceship) {
             tft.setTextSize(2);
             tft.setTextColor(ILI9341_YELLOW);
             tft.setCursor(20, 20);
-            tft.print("You lost this game!! Try again!");
+            tft.println("You lost this game!! Try again!");
+            tft.print("Your final score: " + String(player_score));
             
             // muzica specifica pierderii meciului
             for (int i = 0; i < 24; i++) {
@@ -419,8 +422,9 @@ void game_loop(Spaceship &spaceship) {
         tft.setTextSize(2);
         tft.setTextColor(ILI9341_YELLOW);
         tft.setCursor(20, 20);
-        tft.print("You lost this game!! Try again!");
-        
+        tft.println("You lost this game!! Try again!");
+        tft.print("Your final score: " + String(player_score));
+  
         for (int i = 0; i < 24; i++) {
           tone(buzzerPin, loseNotes[i], noteDuration);
           delay(noteDuration / 2);
